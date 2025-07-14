@@ -1,11 +1,6 @@
 import os
 import fitz  # PyMuPDF
-import textwrap
 from dotenv import load_dotenv
-from reportlab.pdfgen import canvas
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.lib.pagesizes import A4
 import google.generativeai as genai
 
 # .envファイル読み込み
@@ -20,10 +15,6 @@ genai.configure(api_key=api_key)
 # モデル選択
 model = genai.GenerativeModel("models/gemini-2.5-flash")
 
-# 日本語フォント登録（IPAexゴシック）
-font_path = "ipaexg.ttf"  # 同じディレクトリに置いてください
-pdfmetrics.registerFont(TTFont("IPAexGothic", font_path))
-
 # PDFファイル読み込み関数
 def extract_text_from_pdf(pdf_path):
     doc = fitz.open(pdf_path)
@@ -32,63 +23,54 @@ def extract_text_from_pdf(pdf_path):
         text += page.get_text()
     return text
 
-# 要約結果をPDFに保存（自動改行対応）
-def save_summary_to_pdf(summary_text, output_path):
-    c = canvas.Canvas(output_path, pagesize=A4)
-    width, height = A4
-    margin_x = 50
-    margin_y = 50
-    line_height = 18
-
-    text_obj = c.beginText()
-    text_obj.setFont("IPAexGothic", 12)
-    text_obj.setTextOrigin(margin_x, height - margin_y)
-
-    wrap_width = 85  # 行の最大文字数（フォントサイズと調整可能）
-
-    for line in summary_text.splitlines():
-        wrapped_lines = textwrap.wrap(line, width=wrap_width)
-        for wrapped_line in wrapped_lines:
-            if text_obj.getY() < margin_y:
-                c.drawText(text_obj)
-                c.showPage()
-                text_obj = c.beginText()
-                text_obj.setFont("IPAexGothic", 12)
-                text_obj.setTextOrigin(margin_x, height - margin_y)
-            text_obj.textLine(wrapped_line)
-    c.drawText(text_obj)
-    c.save()
+# Markdownファイル保存関数
+def save_markdown(content, output_dir, filename, header):
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, f"{filename}.md")
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(f"# {header}\n\n")
+        f.write(content.strip())
 
 # ディレクトリ設定
 input_dir = "授業ノート"
-output_dir = "結果"
-os.makedirs(output_dir, exist_ok=True)
+summary_dir = "要約結果"
+exercise_dir = "演習問題"
+vocab_dir = "重要単語表"
 
-# PDF処理ループ
+# PDFファイルを順に処理
 for filename in os.listdir(input_dir):
     if filename.lower().endswith(".pdf"):
         pdf_path = os.path.join(input_dir, filename)
-        print(f"\n📄 ファイル: {filename}")
 
         try:
             content = extract_text_from_pdf(pdf_path)
             if len(content.strip()) == 0:
-                print("⚠ テキストが抽出できません。スキップ。")
                 continue
-        except Exception as e:
-            print(f"⚠ 抽出エラー: {e}")
+        except Exception:
             continue
 
-        prompt = f"以下の大学の授業ノートの内容を要約してください。\n\n{content}"
+        base_name = os.path.splitext(filename)[0]
+
+        # 要約生成
         try:
-            response = model.generate_content(prompt)
-            summary = response.text
-            print("📝 要約:\n", summary)
+            prompt_summary = f"以下は大学の授業ノートの内容です。Markdown形式で簡潔に要約してください。\n\n{content}"
+            summary = model.generate_content(prompt_summary).text
+            save_markdown(summary, summary_dir, f"{base_name}_要約", "要約")
+        except Exception:
+            pass
 
-            base_name = os.path.splitext(filename)[0]
-            output_path = os.path.join(output_dir, f"{base_name}_要約.pdf")
-            save_summary_to_pdf(summary, output_path)
-            print(f"✅ 保存完了: {output_path}")
+        # 演習問題生成（問題＋解答）
+        try:
+            prompt_ex = f"以下は大学の授業ノートの内容です。この内容に関する演習問題をMarkdown形式で3問出題し、各問題に模範解答を付けてください。\n\n{content}"
+            exercise = model.generate_content(prompt_ex).text
+            save_markdown(exercise, exercise_dir, f"{base_name}_演習問題", "演習問題と解答")
+        except Exception:
+            pass
 
-        except Exception as e:
-            print(f"⚠ Gemini API エラー: {e}")
+        # 重要単語帳生成
+        try:
+            prompt_vocab = f"以下は大学の授業ノートの内容です。この中から重要な専門用語やキーワードを10個抽出し、それぞれ簡潔に説明を加えたMarkdown形式の単語帳を作成してください。\n\n{content}"
+            vocab = model.generate_content(prompt_vocab).text
+            save_markdown(vocab, vocab_dir, f"{base_name}_重要単語", "重要単語帳")
+        except Exception:
+            pass
