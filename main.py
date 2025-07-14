@@ -1,5 +1,6 @@
 import os
-import fitz
+import fitz  # PyMuPDF
+import textwrap
 from dotenv import load_dotenv
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
@@ -20,10 +21,10 @@ genai.configure(api_key=api_key)
 model = genai.GenerativeModel("models/gemini-2.5-flash")
 
 # 日本語フォント登録（IPAexゴシック）
-font_path = "ipaexg.ttf"
+font_path = "ipaexg.ttf"  # 同じディレクトリに置いてください
 pdfmetrics.registerFont(TTFont("IPAexGothic", font_path))
 
-# PDFファイル読み込み
+# PDFファイル読み込み関数
 def extract_text_from_pdf(pdf_path):
     doc = fitz.open(pdf_path)
     text = ""
@@ -31,20 +32,31 @@ def extract_text_from_pdf(pdf_path):
         text += page.get_text()
     return text
 
-# 要約PDF出力
+# 要約結果をPDFに保存（自動改行対応）
 def save_summary_to_pdf(summary_text, output_path):
     c = canvas.Canvas(output_path, pagesize=A4)
-    c.setFont("IPAexGothic", 12)
     width, height = A4
-    x, y = 50, height - 50
+    margin_x = 50
+    margin_y = 50
+    line_height = 18
 
-    for line in summary_text.split("\n"):
-        if y < 50:
-            c.showPage()
-            c.setFont("IPAexGothic", 12)
-            y = height - 50
-        c.drawString(x, y, line)
-        y -= 18
+    text_obj = c.beginText()
+    text_obj.setFont("IPAexGothic", 12)
+    text_obj.setTextOrigin(margin_x, height - margin_y)
+
+    wrap_width = 85  # 行の最大文字数（フォントサイズと調整可能）
+
+    for line in summary_text.splitlines():
+        wrapped_lines = textwrap.wrap(line, width=wrap_width)
+        for wrapped_line in wrapped_lines:
+            if text_obj.getY() < margin_y:
+                c.drawText(text_obj)
+                c.showPage()
+                text_obj = c.beginText()
+                text_obj.setFont("IPAexGothic", 12)
+                text_obj.setTextOrigin(margin_x, height - margin_y)
+            text_obj.textLine(wrapped_line)
+    c.drawText(text_obj)
     c.save()
 
 # ディレクトリ設定
@@ -52,7 +64,7 @@ input_dir = "授業ノート"
 output_dir = "結果"
 os.makedirs(output_dir, exist_ok=True)
 
-# PDF処理
+# PDF処理ループ
 for filename in os.listdir(input_dir):
     if filename.lower().endswith(".pdf"):
         pdf_path = os.path.join(input_dir, filename)
