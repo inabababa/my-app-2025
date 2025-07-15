@@ -1,76 +1,68 @@
 import os
-import fitz  # PyMuPDF
-from dotenv import load_dotenv
-import google.generativeai as genai
+from config import setup_api
+from pdf_utils import extract_text_from_pdf
+from markdown_utils import save_markdown
+from generator import generate_summary, generate_exercise, generate_vocab
+from pdf_converter import convert_md_to_pdf  # 追加
 
-# .envファイル読み込み
-load_dotenv()
+def process_and_save(model, content, base_name, output_dir, filename_suffix, title):
+    md_filename = f"{base_name}_{filename_suffix}.md"
+    pdf_filename = f"{base_name}_{filename_suffix}.pdf"
 
-# APIキー設定
-api_key = os.getenv("GOOGLE_API_KEY")
-if not api_key:
-    raise ValueError("GOOGLE_API_KEY が環境変数に設定されていません")
-genai.configure(api_key=api_key)
+    # Markdown保存
+    save_markdown(content, output_dir, base_name + f"_{filename_suffix}", title)
+    print(f"{title}のMarkdownファイルを保存しました。")
 
-# モデル選択
-model = genai.GenerativeModel("models/gemini-2.5-flash")
+    # PDF変換パス
+    md_path = os.path.join(output_dir, md_filename)
+    pdf_path = os.path.join(output_dir, pdf_filename)
 
-# PDFファイル読み込み関数
-def extract_text_from_pdf(pdf_path):
-    doc = fitz.open(pdf_path)
-    text = ""
-    for page in doc:
-        text += page.get_text()
-    return text
+    # PDF保存
+    convert_md_to_pdf(md_path, pdf_path)
 
-# Markdownファイル保存関数
-def save_markdown(content, output_dir, filename, header):
-    os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, f"{filename}.md")
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(f"# {header}\n\n")
-        f.write(content.strip())
+def main():
+    print("プログラム開始")
+    model = setup_api()
 
-# ディレクトリ設定
-input_dir = "授業ノート"
-summary_dir = "要約結果"
-exercise_dir = "演習問題"
-vocab_dir = "重要単語表"
+    input_dir = "授業ノート"
+    summary_dir = "要約結果"
+    exercise_dir = "演習問題"
+    vocab_dir = "重要単語表"
 
-# PDFファイルを順に処理
-for filename in os.listdir(input_dir):
-    if filename.lower().endswith(".pdf"):
-        pdf_path = os.path.join(input_dir, filename)
-
-        try:
-            content = extract_text_from_pdf(pdf_path)
-            if len(content.strip()) == 0:
-                continue
-        except Exception:
+    for filename in os.listdir(input_dir):
+        if not filename.lower().endswith(".pdf"):
             continue
+
+        pdf_path = os.path.join(input_dir, filename)
+        print(f"\n--- {filename} の処理を開始します ---")
+
+        print("PDFからデータを取得中...")
+        content = extract_text_from_pdf(pdf_path)
+        if not content:
+            print("PDFが空または読み込みに失敗しました。スキップします。")
+            continue
+        print("データを取得しました。")
 
         base_name = os.path.splitext(filename)[0]
 
-        # 要約生成
-        try:
-            prompt_summary = f"以下は大学の授業ノートの内容です。Markdown形式で簡潔に要約してください。\n\n{content}"
-            summary = model.generate_content(prompt_summary).text
-            save_markdown(summary, summary_dir, f"{base_name}_要約", "要約")
-        except Exception:
-            pass
+        print("Geminiに要約作成を開始します...")
+        summary = generate_summary(model, content)
+        print("Geminiから要約作成完了しました。")
+        process_and_save(model, summary, base_name, summary_dir, "要約", "要約")
 
-        # 演習問題生成（問題＋解答）
-        try:
-            prompt_ex = f"以下は大学の授業ノートの内容です。この内容に関する演習問題をMarkdown形式で3問出題し、各問題に模範解答を付けてください。\n\n{content}"
-            exercise = model.generate_content(prompt_ex).text
-            save_markdown(exercise, exercise_dir, f"{base_name}_演習問題", "演習問題と解答")
-        except Exception:
-            pass
+        print("Geminiに演習問題作成を開始します...")
+        exercise = generate_exercise(model, content)
+        print("Geminiから演習問題作成完了しました。")
+        process_and_save(model, exercise, base_name, exercise_dir, "演習問題", "演習問題と解答")
 
-        # 重要単語帳生成
-        try:
-            prompt_vocab = f"以下は大学の授業ノートの内容です。この中から重要な専門用語やキーワードを10個抽出し、それぞれ簡潔に説明を加えたMarkdown形式の単語帳を作成してください。\n\n{content}"
-            vocab = model.generate_content(prompt_vocab).text
-            save_markdown(vocab, vocab_dir, f"{base_name}_重要単語", "重要単語帳")
-        except Exception:
-            pass
+        print("Geminiに重要単語帳作成を開始します...")
+        vocab = generate_vocab(model, content)
+        print("Geminiから重要単語帳作成完了しました。")
+        process_and_save(model, vocab, base_name, vocab_dir, "重要単語", "重要単語帳")
+
+        print(f"--- {filename} の処理が完了しました ---")
+
+    print("\nすべての処理が完了しました。プログラム終了。")
+
+if __name__ == "__main__":
+    main()

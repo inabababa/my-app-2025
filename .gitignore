@@ -1,4 +1,15 @@
+# 機密ファイル
 .env
+
+# Pythonキャッシュ
+__pycache__/
+*.pyc
+
+# OSキャッシュ
+.DS_Store
+Thumbs.db
+
+# 出力ファイル
 授業ノート/
 要約結果/
 演習問題/
